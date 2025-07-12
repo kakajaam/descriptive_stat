@@ -1,0 +1,171 @@
+---
+title: "R語法懶人包"
+subtitle: "描述統計與模型呈現"
+format: html
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(haven)
+library(sjmisc)
+library(gtsummary)#類別變項次數分佈
+library(modelsummary)#數值變項描述統計表
+library(flextable)#好看格式
+library(psych)
+library(stargazer)
+library(showtext)
+font_add("微軟正黑體","/System/Library/Fonts/STHeiti Medium.ttc")
+showtext_auto()
+
+setwd("/Users/yyaaabbeee/Downloads/0603Q2")
+df <- read_sav("tscs2012q2.sav")
+
+attach(df)
+
+df <- df %>%
+  mutate(居住地 = rec(a9, rec = "1:2=大都市或周圍郊區;3:5=非大都市和周圍郊區;else=NA"),
+         居住地 = factor(居住地, levels = c("大都市或周圍郊區","非大都市和周圍郊區"))) %>%
+  mutate(
+    a2y_r = rec(a2y, rec = "0,97,98 = NA; else = copy"),
+    age = as.numeric(year_m) - as.numeric(a2y_r),
+    年齡分組 = case_when(
+      age <= 40 ~ "40歲（含）以下",
+      age <= 60 ~ "41~60歲",
+      age >= 61 ~ "61歲（含）以上",
+      TRUE ~ NA
+    )) %>%
+  mutate(j7a_r = as.numeric(rec(j7a, rec = "1=1;2=2;3=3;4=4;5=5;else=NA")),
+         j7b_r = as.numeric(rec(j7b, rec = "1=1;2=2;3=3;4=4;5=5;else=NA")),
+         j7c_r = as.numeric(rec(j7c, rec = "1=1;2=2;3=3;4=4;5=5;else=NA")),
+         j7d_r = as.numeric(rec(j7d, rec = "1=1;2=2;3=3;4=4;5=5;else=NA")),
+         j7e_r = as.numeric(rec(j7e, rec = "1=5;2=4;3=3;4=2;5=1;else=NA")),
+         j7g_r = as.numeric(rec(j7g, rec = "1=5;2=4;3=3;4=2;5=1;else=NA"))) %>%
+  rowwise() %>%
+  mutate(同性戀開放度 = sum(c_across(j7a_r:j7g_r), na.rm = F)) %>%
+  ungroup() %>%
+  mutate(性別刻板印象 = as.numeric(rec(f3a, rec = "5=3;1=5;2=4;3=2;4d=1;else=NA"))) %>%
+  mutate(就學年數 = as.numeric(rec(b7, rec = "97:99=NA; else=copy"))) %>%
+  mutate(同性戀結婚 = as.factor(rec(j7g, rec = "1:2=表態贊成者;else=非表態贊成者")))
+```
+
+## 類別變項次數分佈
+
+使用`gtsummary套件`中的`tbl_summary()`呈現類別變項的次數分佈。若要呈現交叉表（cross table），則使用`tbl_cross()`。
+
+```{r warning=FALSE}
+df %>%
+  dplyr::select(居住地) %>%
+  tbl_summary(missing_text = "NA") %>%
+  as_flex_table() %>% #指定以flextable格式輸出
+  set_caption("居住地次數分布")
+
+df %>%
+  tbl_cross(row = 年齡分組,
+            col = 同性戀結婚,
+            missing_text = "NA") %>%
+  as_flex_table() %>%
+  set_caption("同性戀結婚支持與否與年齡分組的交叉表")
+
+df %>%
+  drop_na(居住地) %>%
+  ggplot(aes(x=居住地)) +
+  geom_bar() +
+  labs(
+    y =  "次數",
+    title = "居住地次數分布"
+  ) +
+  theme(
+    text = element_text(family = "微軟正黑體"),
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+
+## 數值變項描述統計
+
+使用`modelsummary`套件中的`datasummary()`呈現數值變項描述統計表，指定呈現樣本數`N`（不計遺漏值）、平均數`Mean`、標準差`SD`、中位數`Median`、最小值`Min`與最大值`Max`。也可以指定分組，呈現分組平均數。
+
+```{r warning=FALSE}
+datasummary(同性戀開放度 ~ N+Mean+SD+Median+Min+Max,
+            data = df,
+            out = "flextable", #指定以flextable格式輸出
+            title = "同性戀開放度描述統計表")
+
+df %>%
+  drop_na(同性戀開放度) %>%
+  ggplot(aes(x=同性戀開放度)) +
+  geom_boxplot() +
+  labs(
+    title = "同性戀開放度盒形圖"
+  ) +
+  theme(
+    text = element_text(family = "微軟正黑體"),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+#可分組
+datasummary(同性戀開放度 ~ 居住地*(Mean),
+            data = df,
+            out = "flextable",
+            title = "同性戀開放度平均數（按居住地分）")
+
+df %>%
+  drop_na(同性戀開放度, 居住地) %>%
+  ggplot(aes(x = 居住地, y = 同性戀開放度)) +
+  geom_boxplot() +
+  labs(
+    title = "同性戀開放度盒形圖（依居住地分組）",
+    x = "居住地",
+    y = "同性戀開放度"
+  ) +
+  theme(
+    text = element_text(family = "微軟正黑體"),
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+
+## 相關係數矩陣
+
+使用`modelsummary`套件中的`datasummary_correlation()`呈現相關係數矩陣，該函數自動呈現下三角型。
+
+```{r warning=FALSE}
+df %>%
+  dplyr::select(同性戀開放度, 就學年數, 性別刻板印象) %>%
+  drop_na() %>%
+  datasummary_correlation(output = "flextable",
+                          title =  "同性戀開放度、就學年數與性別刻板印象之相關矩陣")
+```
+
+## 模型結果呈現
+
+使用`modelsummary`套件中的`modelsummary()`呈現迴歸模型結果。
+
+```{r warning=FALSE, message=FALSE}
+model_1 <- lm(同性戀開放度 ~ 
+              就學年數 +
+              factor(年齡分組) +
+              factor(居住地),
+              data = df)
+
+model_2 <- lm(同性戀開放度 ~ 
+              就學年數 +
+              性別刻板印象 +
+              factor(年齡分組) +
+              factor(居住地) +
+              就學年數 * 性別刻板印象,
+              data = df)
+
+modelsummary(list(model_1,model_2),
+             stars = TRUE,
+             out = "flextable",
+             gof_map = c("nobs", "r.squared", "adj.r.squared"),
+             title = "同性戀開放度迴歸模型") 
+
+#畫分組迴歸線
+df %>%
+  drop_na(同性戀開放度,就學年數,居住地) %>%
+  ggplot(aes(x=就學年數,
+             y=同性戀開放度,
+             color=居住地)) +
+  geom_smooth(method="lm", se = F, size =0.8)+
+  scale_color_manual(values=c("red","blue"), labels = c("大都市","非大都市"))
+```
